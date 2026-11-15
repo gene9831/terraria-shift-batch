@@ -1,5 +1,5 @@
 param(
-    [string]$TerrariaPath = 'D:\SteamLibrary\steamapps\common\Terraria',
+    [Parameter(Mandatory=$true)][string]$TerrariaPath,
     [string]$OutputDirectory = (Join-Path $PSScriptRoot 'dist')
 )
 $ErrorActionPreference = 'Stop'

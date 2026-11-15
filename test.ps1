@@ -1,4 +1,4 @@
-param([string]$TerrariaPath = 'D:\SteamLibrary\steamapps\common\Terraria')
+param([Parameter(Mandatory=$true)][string]$TerrariaPath)
 $ErrorActionPreference = 'Stop'
 & (Join-Path $PSScriptRoot 'build.ps1') -TerrariaPath $TerrariaPath -Tests
 & (Join-Path $PSScriptRoot 'build\ShiftBatch.Tests.exe') $TerrariaPath

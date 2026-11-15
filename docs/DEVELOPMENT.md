@@ -54,7 +54,7 @@ Logger tests retain real Core formatting, filtering and recent-log collection wh
 
 ## Version and packaging
 
-The product stays at 1.0 (manifest 1.0.0, assembly 1.0.0.0) until the maintainer explicitly authorizes a release. Development changes and local packages do not imply a release or authorize a push/tag. Runtime debug lines include the assembly module identifier to distinguish local builds without increasing the product version.
+Product versions are defined in manifest.json and AssemblyInfo.cs. Runtime debug lines include the module identifier to distinguish builds.
 
 package.ps1 derives ZIP names from manifest.version and recreates its checked project-local build/package staging directory. The runtime ZIP contains exactly ShiftBatch.dll, manifest.json and LICENSE.txt. README documents are source-only. Tests seed stale README/binary files before rebuilding and verify the exact ZIP file list and version consistency. Updating a merged installation must separately remove the two obsolete README files; ZIP extraction alone cannot remove them.
 
@@ -79,7 +79,5 @@ This build targets Terraria 1.4.5.8. The installed Core assembly reports version
 `test.ps1` executes the assertion runner as x86 to match Terraria's architecture. It resolves the game's embedded managed dependencies and redirects `Program.SavePath` into `build/game-sandbox` before game-type initialization.
 
 Tests inspect and patch the real local game methods, exercise capacity callbacks with real game objects, and verify Core config persistence. Purchase regressions call the real ItemSlot.Handle dispatcher with production patches installed, retaining native LeftClick/RightClick and transaction routing; hover presentation alone is skipped in the headless fixture. Tests also simulate a blocked native inventory-action guard. They do not launch the game entry point or open user saves. Actual UI interaction and multiplayer require separate manual verification.
-
-The maintainer verified buying, crafting and corrected auto-stow behavior in game on 2026-11-15. The maintainer also verified diagnostics and its live logs. The final downloaded CI Release is verified separately. Multiplayer and arbitrary third-party patch combinations remain unverified.
 
 For public-dependency GitHub-hosted builds and tag publication, see [CI.md](CI.md). The temporary server-derived CI reference never enters a release archive.

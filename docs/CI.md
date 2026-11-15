@@ -4,7 +4,7 @@ The [workflow](../.github/workflows/release.yml) builds on GitHub-hosted Windows
 
 ## Public dependencies
 
-No local game upload, private dependency repository, Steam credentials or self-hosted runner is required. [Prepare-Dependencies.ps1](../ci/Prepare-Dependencies.ps1) downloads fixed files and verifies their SHA-256 hashes before use:
+[Prepare-Dependencies.ps1](../ci/Prepare-Dependencies.ps1) downloads fixed files and verifies their SHA-256 hashes before use:
 
 | Dependency | Source |
 | --- | --- |
@@ -16,7 +16,7 @@ XNA is installed only on the disposable CI machine when missing. Downloaded depe
 
 The public Windows server includes the shared shop/crafting methods needed for headless tests, but its assembly identity is `TerrariaServer` and Main inherits `Terraria.Server.Game`. CI uses Mono.Cecil to create a temporary client-compatible reference/test assembly: identity `Terraria`, supported version 1.4.5.8, Main base `Microsoft.Xna.Framework.Game`. The source files and hashes are pinned; unexpected upstream identities/base types fail preparation. No game/server entry point is launched.
 
-The built mod is audited for the client assembly identity and absence of `TerrariaServer` or `Terraria.Server.*` references. For the 1.0 release, the same test executable compiled against this public reference also passed all 272 assertions when run against the actual local Terraria client. These headless checks do not replace graphical in-game verification, especially after changes to the reference adapter or game APIs.
+The built mod is audited for the client assembly identity and absence of `TerrariaServer` or `Terraria.Server.*` references. Verify changes to the reference adapter against the actual Terraria client. These headless checks do not replace graphical in-game verification, especially after changes to the reference adapter or game APIs.
 
 ## Checks and assets
 
@@ -35,8 +35,9 @@ Existing Releases are not silently overwritten. A failed build cannot enter the 
 Update manifest and assembly versions together, add `docs/releases/<version>.md`, and push the reviewed commit to main. Let branch CI pass before pushing an annotated tag:
 
 ```powershell
-git tag -a v1.0.0 -m 'Shift Batch 1.0.0'
-git push origin v1.0.0
+$version = (Get-Content -Raw manifest.json | ConvertFrom-Json).version
+git tag -a "v$version" -m "Shift Batch $version"
+git push origin "v$version"
 ```
 
 The tag workflow performs the build again and creates the Release itself. Do not upload locally built ZIPs to replace its assets. Download the published ZIP and `SHA256SUMS.txt`, run `ci/Verify-Package.ps1` against the downloaded files, then install from that downloaded archive after closing the game. Preserve the Core configuration file.

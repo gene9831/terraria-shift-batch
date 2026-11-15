@@ -40,7 +40,7 @@ Open a repository issue with:
 - Expected and actual behavior.
 - Relevant `[shift-batch]` lines from the latest Core session log.
 
-Enable **Debug logging** on Shift Batch's configuration page before reproducing the problem, then turn it off. Debug lines include a module build identifier, useful while local builds share product version 1.0.0.
+Enable **Debug logging** on Shift Batch's configuration page before reproducing the problem, then turn it off. Include the module build identifier from the diagnostic lines when reporting a bug.
 
 Include a short relevant log excerpt rather than an entire save, configuration collection, or unrelated session history. Remove personal data before posting.
 

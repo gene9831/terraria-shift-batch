@@ -1,4 +1,4 @@
-param([string]$TerrariaPath = 'D:\SteamLibrary\steamapps\common\Terraria')
+param([Parameter(Mandatory=$true)][string]$TerrariaPath)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $outputDir = Join-Path $projectRoot 'build\package-check'
