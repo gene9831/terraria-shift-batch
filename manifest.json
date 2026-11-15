@@ -1,10 +1,10 @@
 {
   "id": "shift-batch",
   "name": "Shift Batch",
-  "version": "1.1.0",
+  "version": "1.0.0",
   "framework_version": ">=0.4.1",
   "author": "Gene",
-  "description": "Configurable Shift buying/crafting batches (10-9999), optional delayed auto-stow, and an immediate capacity-limit sound. Auto-stow is off by default.",
+  "description": "Configurable Shift buying/crafting batches (10-9999), optional delayed auto-stow. Auto-stow is off by default.",
   "entry_dll": "ShiftBatch.dll",
   "multiplayer": "client-only"
 }

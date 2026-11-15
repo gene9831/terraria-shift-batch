@@ -3,6 +3,7 @@ build/
 dist/
 bin/
 obj/
+.ci-deps/
 *.dll
 *.exe
 *.pdb

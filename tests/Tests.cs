@@ -91,6 +91,7 @@ internal static class Tests
         CheckNativeIntegration();
         CheckAutoStowIntegration();
         CheckModLifecycle();
+        CheckCoreLogging();
     }
 
     private static Type Find(string name) { return Assembly.GetExecutingAssembly().GetType(name); }
@@ -113,7 +114,11 @@ internal static class Tests
         Equal("10", (string)buy.GetValue(config, null), "purchase default");
         Equal("10", (string)craft.GetValue(config, null), "craft default");
         Equal(false, (bool)type.GetProperty("AutoStow").GetValue(config, null), "auto-stow defaults off");
-        Equal(true, (bool)type.GetProperty("LimitSound").GetValue(config, null), "limit sound available when auto-stow enabled");
+        Equal(true, type.GetProperty("LimitSound") == null, "removed sound setting is absent from config");
+        PropertyInfo debug=type.GetProperty("DebugLogging");
+        Equal(true,debug!=null,"dedicated debug switch exists");
+        Equal(false,(bool)debug.GetValue(config,null),"debug logging defaults off");
+        Equal(true,debug.IsDefined(typeof(TerrariaModder.Core.Config.ClientAttribute),true),"debug switch is client-visible in mod settings");
         buy.SetValue(config, "1000", null);
         craft.SetValue(config, "100", null);
         buy.SetValue(config, "abc", null);
@@ -161,15 +166,15 @@ internal static class Tests
         Equal(true,type.GetMethod("EndDraw")!=null,"draw-activity cancellation exists without assuming 60fps rendering");
         object state = Activator.CreateInstance(type);
         object source = new object(), cursor = new object();
-        Equal(1, Observe(type,state,0,source,1,cursor,9999,true), "sound notification on reaching limit");
-        Equal(0, Observe(type,state,0,source,1,cursor,9999,true), "no repeated notification in same frame");
+        Equal(1, Observe(type,state,0,source,1,cursor,9999,true), "start delay on reaching limit");
+        Equal(0, Observe(type,state,0,source,1,cursor,9999,true), "no transfer in same frame");
         for(uint tick=1;tick<18;tick++) Equal(0, Observe(type,state,tick,source,1,cursor,9999,true), "wait before transfer "+tick);
         Equal(2, Observe(type,state,18,source,1,cursor,9999,true), "transfer only after 18 ticks");
         type.GetMethod("Block").Invoke(state,null);
         Equal(0, Observe(type,state,19,source,1,cursor,9999,true), "full inventory stops retry");
-        Equal(0, Observe(type,state,20,source,1,cursor,9999,true), "full inventory does not repeat sound");
+        Equal(0, Observe(type,state,20,source,1,cursor,9999,true), "full inventory remains blocked");
         type.GetMethod("Reset").Invoke(state,null);
-        Equal(1, Observe(type,state,21,source,1,cursor,9999,true), "release and restart rearms notification");
+        Equal(1, Observe(type,state,21,source,1,cursor,9999,true), "release and restart rearms delay");
         Equal(1, Observe(type,state,22,new object(),1,cursor,9999,true), "changed source starts fresh delay");
         Equal(1, Observe(type,state,23,source,2,new object(),9999,true), "changed cursor starts fresh delay");
         Equal(0, Observe(type,state,24,source,2,cursor,100,false), "not-full cursor cancels pending transfer");
@@ -256,7 +261,20 @@ internal static class Tests
         Equal(10,migrated.PurchaseCount,"old low purchase migrates to 10");
         Equal(10,migrated.CraftCount,"old low craft migrates to 10");
         Equal(false,migrated.AutoStow,"old config does not enable auto-stow");
-        Equal(2,migrated.Version,"new config schema");
+        Equal(4,migrated.Version,"new config schema");
+        File.WriteAllText(path,"{\"_version\":2,\"PurchaseBatch\":\"1000\",\"CraftBatch\":\"100\",\"AutoStow\":true,\"LimitSound\":true}");
+        var upgraded=(ShiftBatch.BatchConfig)TerrariaModder.Core.Config.ConfigManager.LoadForMod("shift-batch",Assembly.GetExecutingAssembly(),root,null,null);
+        Equal(1000,upgraded.PurchaseCount,"v2 upgrade preserves purchase setting");
+        Equal(100,upgraded.CraftCount,"v2 upgrade preserves separate craft setting");
+        Equal(true,upgraded.AutoStow,"v2 upgrade preserves enabled auto-stow");
+        upgraded.Save();
+        Equal(false,File.ReadAllText(path).Contains("LimitSound"),"v3 save removes obsolete sound setting");
+        Equal(false,(bool)type.GetProperty("DebugLogging").GetValue(upgraded,null),"existing config leaves new diagnostics disabled");
+        type.GetProperty("DebugLogging").SetValue(upgraded,true,null);
+        upgraded.Save();
+        var withDebug=TerrariaModder.Core.Config.ConfigManager.LoadForMod("shift-batch",Assembly.GetExecutingAssembly(),root,null,null);
+        Equal(true,(bool)type.GetProperty("DebugLogging").GetValue(withDebug,null),"debug switch persists independently");
+        Equal("1000",(string)type.GetProperty("PurchaseBatch").GetValue(withDebug,null),"saving diagnostics preserves purchase setting");
     }
 
     private static void CheckHarmonyInstall(Type patches, Assembly game, Type itemSlot, Type main, BindingFlags flags)
@@ -355,10 +373,10 @@ internal static class Tests
         }
     }
 
-    private static int limitSounds;
     private static int inventoryCalls;
     private static bool throwAfterPickup;
-    private static bool RecordLimitSound() { limitSounds++; return false; }
+    private static bool SkipHoverPresentation() { return false; }
+    private static bool PendingInventoryAction(ref bool __result) { __result=true; return false; }
     private static void RecordInventoryCall() { inventoryCalls++; }
     private static void FailAfterPickup(){if(throwAfterPickup)throw new InvalidOperationException("test pickup callback failure");}
 
@@ -384,38 +402,52 @@ internal static class Tests
         var harness=new Harmony("shift-batch.auto-stow-tests");
         try
         {
-            MethodInfo play=typeof(Terraria.Audio.SoundEngine).GetMethod("PlaySound",new Type[]{typeof(int),typeof(int),typeof(int),typeof(int),typeof(float),typeof(float)});
-            harness.Patch(play,prefix:new HarmonyMethod(typeof(Tests).GetMethod("RecordLimitSound",BindingFlags.Static|BindingFlags.NonPublic)));
             harness.Patch(typeof(Terraria.Player).GetMethod("GetItem"),prefix:new HarmonyMethod(typeof(Tests).GetMethod("RecordInventoryCall",BindingFlags.Static|BindingFlags.NonPublic)),postfix:new HarmonyMethod(typeof(Tests).GetMethod("FailAfterPickup",BindingFlags.Static|BindingFlags.NonPublic)));
             var player=(Terraria.Player)System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(Terraria.Player));
             player.inventory=new Terraria.Item[59]; player.inventoryChestStack=new bool[59]; player.disableVoidBag=-1; player.active=true; player.dead=false;
             Terraria.Main.player[0]=player; Terraria.Main.myPlayer=0;
             var fakeMain=(Terraria.Main)System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(Terraria.Main));
             GC.SuppressFinalize(fakeMain);
+            fakeMain.shop=new Terraria.Chest[100];
             FieldInfo activeGame=typeof(Microsoft.Xna.Framework.Game).GetField("isActive",BindingFlags.Instance|BindingFlags.NonPublic);
             activeGame.SetValue(fakeMain,true); Terraria.Main.instance=fakeMain;
             Terraria.Main.gameMenu=false; Terraria.Main.playerInventory=true; Terraria.Main.gamePaused=false; Terraria.Main.blockInput=false; Terraria.Main.cursorOverride=0;
             Terraria.Main.mouseLeft=true; Terraria.Main.mouseRight=false; Terraria.UI.ItemSlot.ShiftForcedOn=true;
-            var config=new ShiftBatch.BatchConfig(); config.AutoStow=true; config.LimitSound=true;
+            var config=new ShiftBatch.BatchConfig(); config.AutoStow=true;
             ShiftBatch.NativePatches.Config=config; ShiftBatch.NativePatches.Active=true;
             var shop=new Terraria.Item[]{MakeItem(3,9999,9999)}; shop[0].isAShopItem=true;
-            ResetStow(stow); EmptyInventory(player); limitSounds=0; inventoryCalls=0;
+            // Exercise the real shop dispatcher and its LeftClick/RightClick
+            // routing, with only hover presentation suppressed in this headless
+            // fixture. Full cursors bypass HandleShopSlot on the left path.
+            CheckShopRouting(stow, harness, player, shop, config);
+            var diagnosticLog=new TestLogger();
+            Type diagnostics=Find("ShiftBatch.DebugLog");
+            Equal(true,diagnostics!=null,"scoped diagnostics available");
+            typeof(ShiftBatch.BatchConfig).GetProperty("DebugLogging").SetValue(config,true,null);
+            diagnostics.GetMethod("Initialize").Invoke(null,new object[]{diagnosticLog,config});
+            ShiftBatch.AutoStow.Logger=diagnosticLog;
+            ResetStow(stow); EmptyInventory(player); inventoryCalls=0;
             Terraria.Main.mouseItem=MakeItem(3,9999,9999);
             ObserveShop(stow,shop,0);
-            Equal(1,limitSounds,"limit sound immediately before any transfer");
             Equal(0,inventoryCalls,"no immediate transfer");
             for(uint tick=1;tick<18;tick++)ObserveShop(stow,shop,tick);
-            Equal(9999,Terraria.Main.mouseItem.stack,"held stack remains during warning delay");
+            Equal(1,diagnosticLog.DebugMessages.Count,"waiting emits one event, not one per frame");
+            Equal(9999,Terraria.Main.mouseItem.stack,"held stack remains during transfer delay");
             ObserveShop(stow,shop,18);
             Equal(true,Terraria.Main.mouseItem.IsAir,"full stack enters inventory after delay");
             Equal(9999,InventoryCount(player,3),"complete transfer conserves quantity");
             Equal(1,inventoryCalls,"exactly one native transfer");
-            Equal(1,limitSounds,"transfer itself plays no new sound");
+            Equal(2,diagnosticLog.DebugMessages.Count,"completed transfer adds one result event");
+            Equal(true,diagnosticLog.DebugMessages.Any(x=>x.Contains("source=shop")&&x.Contains("moved=9999")&&x.Contains("remaining=0")),"shop diagnostics include conservation quantities");
 
-            ResetStow(stow); EmptyInventory(player); Terraria.Main.mouseItem=MakeItem(3,9999,9999); limitSounds=0; inventoryCalls=0;
+            ResetStow(stow); EmptyInventory(player); Terraria.Main.mouseItem=MakeItem(3,9999,9999); inventoryCalls=0;
             ObserveShop(stow,shop,100);
             Terraria.Main.mouseLeft=false;
             stow.GetMethod("CancelIfInactive").Invoke(null,null);
+            Equal(true,diagnosticLog.DebugMessages.Last().Contains("Auto-stow cancelled:"),"release logs cancellation once");
+            int afterCancel=diagnosticLog.DebugMessages.Count;
+            stow.GetMethod("CancelIfInactive").Invoke(null,null);
+            Equal(afterCancel,diagnosticLog.DebugMessages.Count,"inactive frames do not repeat cancellation logs");
             Terraria.Main.mouseLeft=true;
             ObserveShop(stow,shop,101);
             Equal(0,inventoryCalls,"release cancels expired work");
@@ -425,7 +457,7 @@ internal static class Tests
             Equal(1,inventoryCalls,"continued hold transfers after fresh delay");
 
             ResetStow(stow); FillInventory(player); player.inventory[0].stack=9994;
-            Terraria.Main.mouseItem=MakeItem(3,9999,9999); inventoryCalls=0; limitSounds=0;
+            Terraria.Main.mouseItem=MakeItem(3,9999,9999); inventoryCalls=0;
             long before=InventoryCount(player,3)+(long)Terraria.Main.mouseItem.stack;
             for(uint tick=200;tick<=218;tick++)ObserveShop(stow,shop,tick);
             Equal(9994,Terraria.Main.mouseItem.stack,"partial transfer keeps cursor remainder");
@@ -435,9 +467,9 @@ internal static class Tests
             for(uint tick=219;tick<=260;tick++)ObserveShop(stow,shop,tick);
             Equal(9999,Terraria.Main.mouseItem.stack,"full inventory preserves held item");
             Equal(2,inventoryCalls,"failed transfer is not retried each frame");
-            Equal(2,limitSounds,"one sound per full-stack cycle even when inventory blocked");
+            Equal(1,diagnosticLog.DebugMessages.Count(x=>x.Contains("Auto-stow blocked:")),"full bag emits one blocked result without frame spam");
 
-            ResetStow(stow); EmptyInventory(player); inventoryCalls=0; limitSounds=0;
+            ResetStow(stow); EmptyInventory(player); inventoryCalls=0;
             var recipe=(Terraria.Recipe)System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(Terraria.Recipe));
             recipe.createItem=MakeItem(3,25,9999);
             Terraria.Main.recipe=new Terraria.Recipe[]{recipe}; Terraria.Main.availableRecipe=new int[]{0}; Terraria.Main.numAvailableRecipes=1; Terraria.Main.focusRecipe=0;
@@ -446,7 +478,7 @@ internal static class Tests
             for(uint tick=300;tick<=318;tick++)ObserveCraft(stow,tick);
             Equal(9975,InventoryCount(player,3),"effectively full multi-output recipe stows below numeric max");
             Equal(true,Terraria.Main.mouseItem.IsAir,"multi-output craft can continue with empty cursor");
-            Equal(1,limitSounds,"multi-output effective limit notifies once");
+            Equal(true,diagnosticLog.DebugMessages.Any(x=>x.Contains("source=craft")&&x.Contains("perCraft=25")),"craft diagnostics identify multi-output capacity");
             Equal(0,(int)typeof(Terraria.Main).GetField("_currentRecipeBeingCrafted",BindingFlags.Static|BindingFlags.NonPublic).GetValue(null),"stacking craft preserves native recipe-change guard");
 
             ResetStow(stow); EmptyInventory(player); recipe.createItem=MakeItem(3,1,1); Terraria.Main.mouseItem=MakeItem(3,1,1); Terraria.Main.mouseItem.prefix=5;
@@ -456,14 +488,12 @@ internal static class Tests
             Equal((byte)5,player.inventory[49].prefix,"native transfer preserves prefix");
             Equal(-1,(int)typeof(Terraria.Main).GetField("_currentRecipeBeingCrafted",BindingFlags.Static|BindingFlags.NonPublic).GetValue(null),"nonstacking recipe repeat rearms");
 
-            ResetStow(stow); EmptyInventory(player); config.AutoStow=false; Terraria.Main.mouseItem=MakeItem(3,9999,9999); inventoryCalls=0; limitSounds=0;
+            ResetStow(stow); EmptyInventory(player); config.AutoStow=false; Terraria.Main.mouseItem=MakeItem(3,9999,9999); inventoryCalls=0;
             for(uint tick=500;tick<=530;tick++)ObserveShop(stow,shop,tick);
             Equal(0,inventoryCalls,"disabled auto-stow never moves cursor");
-            Equal(0,limitSounds,"default mode adds no limit sound");
-            config.AutoStow=true; config.LimitSound=false;
+            config.AutoStow=true;
             for(uint tick=600;tick<=618;tick++)ObserveShop(stow,shop,tick);
-            Equal(1,inventoryCalls,"sound toggle does not disable transfer");
-            Equal(0,limitSounds,"limit sound can be disabled");
+            Equal(1,inventoryCalls,"re-enabled auto-stow transfers");
 
             ResetStow(stow); EmptyInventory(player); Terraria.Main.mouseItem=MakeItem(3,9999,9999); inventoryCalls=0;
             for(uint tick=700;tick<=718;tick+=2)ObserveShop(stow,shop,tick);
@@ -478,9 +508,14 @@ internal static class Tests
             Equal(1,inventoryCalls,"returning to target requires new full delay");
 
             ResetStow(stow); EmptyInventory(player); Terraria.Main.mouseItem=MakeItem(3,9999,9999); inventoryCalls=0; throwAfterPickup=true;
+            typeof(ShiftBatch.BatchConfig).GetProperty("DebugLogging").SetValue(config,false,null);
+            diagnostics.GetMethod("ApplySettings").Invoke(null,null);
+            int debugBefore=diagnosticLog.DebugMessages.Count;
             for(uint tick=900;tick<=918;tick++)ObserveShop(stow,shop,tick);
             Equal(9999,InventoryCount(player,3),"pickup exception after placement preserves inventory");
             Equal(true,Terraria.Main.mouseItem.IsAir,"pickup exception does not duplicate held stack or retain slot alias");
+            Equal(debugBefore,diagnosticLog.DebugMessages.Count,"disabled diagnostics stay silent during transfer failure");
+            Equal(true,diagnosticLog.Warnings.Any(x=>x.Contains("Auto-stow interrupted")),"transfer warnings remain available with debug disabled");
             ResetStow(stow); FillInventory(player); player.inventory[0].stack=9994; Terraria.Main.mouseItem=MakeItem(3,9999,9999);
             before=InventoryCount(player,3)+(long)Terraria.Main.mouseItem.stack;
             for(uint tick=1000;tick<=1018;tick++)ObserveShop(stow,shop,tick);
@@ -512,17 +547,17 @@ internal static class Tests
             ResetStow(stow); EmptyInventory(player); Terraria.Main.mouseItem=MakeItem(3,9999,9999); inventoryCalls=0;
             Terraria.Main.mouseLeft=false; Terraria.Main.mouseRight=true;
             for(uint tick=1400;tick<=1418;tick++){
-                SetTick(tick); object[] right={shop,0,true,false,null}; stow.GetMethod("ShopPrefix").Invoke(null,right);
-                stow.GetMethod("ShopPostfix").Invoke(null,new object[]{right[4]}); stow.GetMethod("EndDraw").Invoke(null,null);
+                SetTick(tick); object[] right={shop,15,0,null}; stow.GetMethod("ShopRightPrefix").Invoke(null,right);
+                stow.GetMethod("ShopPostfix").Invoke(null,new object[]{right[3]}); stow.GetMethod("EndDraw").Invoke(null,null);
             }
             Equal(1,inventoryCalls,"right-button continuous purchase can auto-stow");
             Terraria.Main.mouseLeft=true; Terraria.Main.mouseRight=false;
 
             FieldInfo preventCraft=typeof(Terraria.Main).GetField("_preventCraftingBecauseClickWasUsedToChangeFocusedRecipe",BindingFlags.Static|BindingFlags.Public|BindingFlags.NonPublic);
-            recipe.createItem=MakeItem(3,25,9999); config.LimitSound=true;
+            recipe.createItem=MakeItem(3,25,9999);
             for(int guard=0;guard<5;guard++){
                 ResetStow(stow); EmptyInventory(player); player.inventory[0]=MakeItem(3,1,9999);
-                Terraria.Main.mouseItem=MakeItem(3,9975,9999); inventoryCalls=0; limitSounds=0;
+                Terraria.Main.mouseItem=MakeItem(3,9975,9999); inventoryCalls=0;
                 if(guard==0)player.reuseDelay=1;
                 if(guard==1)player.channel=true;
                 if(guard==2)player.pendingItemReuse=true;
@@ -531,14 +566,13 @@ internal static class Tests
                 uint start=(uint)(1500+guard*100);
                 for(uint tick=start;tick<=start+30;tick++)ObserveCraft(stow,tick);
                 Equal(0,inventoryCalls,"native craft guard prevents transfer: "+guard);
-                Equal(0,limitSounds,"native craft guard prevents limit event: "+guard);
                 player.reuseDelay=0; player.channel=false; player.pendingItemReuse=false; player.inventoryChestStack[0]=false; preventCraft.SetValue(null,false);
             }
-            ResetStow(stow); EmptyInventory(player); Terraria.Main.mouseItem=MakeItem(3,9975,9999); limitSounds=0;
+            ResetStow(stow); EmptyInventory(player); Terraria.Main.mouseItem=MakeItem(3,9975,9999); inventoryCalls=0;
             SetTick(2100); object[] selection={0,null}; stow.GetMethod("CraftPrefix").Invoke(null,selection);
             preventCraft.SetValue(null,true);
             stow.GetMethod("CraftPostfix").Invoke(null,new object[]{selection[1]}); stow.GetMethod("EndDraw").Invoke(null,null);
-            Equal(0,limitSounds,"native selection guard set during hover is rechecked after it");
+            Equal(0,inventoryCalls,"selection guard set during hover prevents immediate transfer");
             preventCraft.SetValue(null,false);
 
             Type requests=typeof(Terraria.Main).Assembly.GetType("Terraria.GameContent.CraftingRequests",true);
@@ -547,15 +581,17 @@ internal static class Tests
             object request=System.Runtime.Serialization.FormatterServices.GetUninitializedObject(queue.GetType().GetGenericArguments()[0]);
             queue.GetType().GetMethod("Enqueue").Invoke(queue,new object[]{request});
             try {
-                ResetStow(stow); EmptyInventory(player); Terraria.Main.mouseItem=MakeItem(3,9975,9999); inventoryCalls=0; limitSounds=0;
+                ResetStow(stow); EmptyInventory(player); Terraria.Main.mouseItem=MakeItem(3,9975,9999); inventoryCalls=0;
                 for(uint tick=2200;tick<=2230;tick++)ObserveCraft(stow,tick);
                 Equal(0,inventoryCalls,"pending remote craft grants prevent cursor transfer");
-                Equal(0,limitSounds,"pending remote craft grants defer capacity notification");
             } finally {queue.GetType().GetMethod("Dequeue").Invoke(queue,null);}
         }
         finally
         {
             throwAfterPickup=false; ResetStow(stow); harness.UnpatchAll(harness.Id);
+            Type diagnostics=Find("ShiftBatch.DebugLog");
+            if(diagnostics!=null)diagnostics.GetMethod("Unload").Invoke(null,null);
+            ShiftBatch.AutoStow.Logger=null;
             ShiftBatch.NativePatches.Active=false; ShiftBatch.NativePatches.Config=null;
             foreach(var entry in oldFields)entry.Key.SetValue(null,entry.Value);
             Terraria.Main.player[0]=oldPlayer; Terraria.UI.ItemSlot.ShiftForcedOn=oldShift;
@@ -563,12 +599,73 @@ internal static class Tests
     }
 
     private static void ResetStow(Type stow){stow.GetMethod("Reset").Invoke(null,null);}
+    private static void CheckShopRouting(Type stow,Harmony harness,Terraria.Player player,Terraria.Item[] shop,ShiftBatch.BatchConfig config)
+    {
+        var flags=BindingFlags.Static|BindingFlags.Public|BindingFlags.NonPublic;
+        var signature=new Type[]{typeof(Terraria.Item[]),typeof(int),typeof(int)};
+        var skip=new HarmonyMethod(typeof(Tests).GetMethod("SkipHoverPresentation",flags));
+        harness.Patch(typeof(Terraria.UI.ItemSlot).GetMethod("OverrideHover",flags,null,signature,null),prefix:skip);
+        harness.Patch(typeof(Terraria.UI.ItemSlot).GetMethod("MouseHover",flags,null,signature,null),prefix:skip);
+        string root=Directory.GetParent(AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar)).FullName;
+        var manifest=TerrariaModder.Core.Manifest.ManifestParser.Parse(Path.Combine(root,"manifest.json"));
+        var context=new TerrariaModder.Core.ModContext(new TestLogger(),root,manifest,config);
+        var mod=new ShiftBatch.Mod();
+        bool release=Terraria.Main.mouseLeftRelease;
+        try {
+            mod.Initialize(context); mod.OnContentReady(context);
+            Equal(true,ShiftBatch.NativePatches.Active,"real shop regression installs production patches");
+            ResetStow(stow); EmptyInventory(player); inventoryCalls=0;
+            Terraria.Main.mouseItem=MakeItem(3,9999,9999); Terraria.Main.mouseLeftRelease=false;
+            for(uint tick=0;tick<=18;tick++){
+                SetTick(tick);
+                Terraria.UI.ItemSlot.Handle(shop,15,0,true);
+                stow.GetMethod("EndDraw").Invoke(null,null);
+            }
+            Equal(1,inventoryCalls,"real held-left shop dispatch stows a full cursor after 18 ticks");
+            Equal(true,Terraria.Main.mouseItem.IsAir,"real shop routing clears the full cursor");
+            Equal(9999,InventoryCount(player,3),"real shop routing conserves purchased items");
+            ResetStow(stow); EmptyInventory(player); inventoryCalls=0;
+            Terraria.Main.mouseItem=MakeItem(3,9999,9999);
+            Terraria.Main.mouseLeft=false; Terraria.Main.mouseRight=true;
+            for(uint tick=100;tick<=118;tick++){
+                SetTick(tick); Terraria.UI.ItemSlot.Handle(shop,15,0,true);
+                stow.GetMethod("EndDraw").Invoke(null,null);
+            }
+            Equal(1,inventoryCalls,"real held-right shop dispatch stows after 18 ticks");
+            Equal(9999,InventoryCount(player,3),"real right-button transfer conserves quantity");
+            ResetStow(stow); FillInventory(player); inventoryCalls=0;
+            Terraria.Main.mouseItem=MakeItem(3,9999,9999);
+            Terraria.Main.mouseLeft=true; Terraria.Main.mouseRight=false;
+            long total=InventoryCount(player,3)+Terraria.Main.mouseItem.stack;
+            for(uint tick=200;tick<=245;tick++){
+                SetTick(tick); Terraria.UI.ItemSlot.Handle(shop,15,0,true);
+                stow.GetMethod("EndDraw").Invoke(null,null);
+            }
+            Equal(1,inventoryCalls,"real full-bag shop dispatch does not retry every frame");
+            Equal(9999,Terraria.Main.mouseItem.stack,"real full-bag shop retains held stack");
+            Equal(total,InventoryCount(player,3)+Terraria.Main.mouseItem.stack,"real full-bag shop conserves all items");
+            ResetStow(stow); EmptyInventory(player); inventoryCalls=0;
+            Terraria.Main.mouseItem=MakeItem(3,9999,9999);
+            MethodInfo pending=typeof(Terraria.Main).GetMethod("LocalPlayerHasPendingInventoryActions",flags);
+            harness.Patch(pending,prefix:new HarmonyMethod(typeof(Tests).GetMethod("PendingInventoryAction",flags)));
+            try {
+                for(uint tick=300;tick<=330;tick++){
+                    SetTick(tick); Terraria.UI.ItemSlot.Handle(shop,15,0,true);
+                    stow.GetMethod("EndDraw").Invoke(null,null);
+                }
+                Equal(0,inventoryCalls,"pending native inventory actions prevent shop auto-stow");
+            } finally {harness.Unpatch(pending,HarmonyPatchType.All,harness.Id);}
+        } finally {
+            mod.Unload(); Terraria.Main.mouseLeftRelease=release;
+            ShiftBatch.NativePatches.Config=config; ShiftBatch.NativePatches.Active=true;
+        }
+    }
     private static void SetTick(uint tick){typeof(Terraria.Main).GetField("_gameUpdateCount",BindingFlags.Static|BindingFlags.NonPublic).SetValue(null,tick);}
     private static void ObserveShop(Type stow,Terraria.Item[] inventory,uint tick)
     {
-        SetTick(tick); object[] args={inventory,0,false,true,null};
-        stow.GetMethod("ShopPrefix").Invoke(null,args);
-        stow.GetMethod("ShopPostfix").Invoke(null,new object[]{args[4]});
+        SetTick(tick); object[] args={inventory,15,0,null};
+        stow.GetMethod("ShopLeftPrefix").Invoke(null,args);
+        stow.GetMethod("ShopPostfix").Invoke(null,new object[]{args[3]});
         MethodInfo end=stow.GetMethod("EndDraw"); if(end!=null)end.Invoke(null,null);
     }
     private static void ObserveCraft(Type stow,uint tick)
@@ -601,13 +698,15 @@ internal static class Tests
         if (!manifest.IsValid) Console.WriteLine("Manifest errors: " + String.Join("; ", manifest.ValidationErrors));
         Equal(true, manifest.IsValid, "real Core manifest parser accepts package");
         Equal("shift-batch", manifest.Id, "manifest identity");
-        var logger = new TestLogger();
+        var logger = new TestLogger(); logger.MinLevel=TerrariaModder.Core.Logging.LogLevel.Warn;
         var config = new ShiftBatch.BatchConfig();
         var context = new TerrariaModder.Core.ModContext(logger, root, manifest, config);
         var mod = new ShiftBatch.Mod();
         try
         {
             mod.Initialize(context);
+            Equal(0,logger.DebugMessages.Count,"default lifecycle emits no optional diagnostics");
+            Equal(TerrariaModder.Core.Logging.LogLevel.Warn,logger.MinLevel,"disabled diagnostics preserve existing logger threshold");
             Equal(false, ShiftBatch.NativePatches.Active, "patches deferred until content ready");
             mod.OnContentReady(context);
             Equal(true, ShiftBatch.NativePatches.Active, "actual mod lifecycle activates patches");
@@ -621,10 +720,24 @@ internal static class Tests
             Terraria.Main.mouseItem = empty;
             Equal(100, Terraria.UI.ItemSlot.GetBulkBuyAmount(output), "actual detoured purchase helper reads config");
             Equal(399, Terraria.UI.ItemSlot.GetBulkCraftAmount(output), "actual detoured craft tooltip respects multi-output cap");
+            typeof(ShiftBatch.BatchConfig).GetProperty("DebugLogging").SetValue(config,true,null);
+            mod.OnConfigChanged();
+            Equal(TerrariaModder.Core.Logging.LogLevel.Debug,logger.MinLevel,"mod settings debug switch opens this mod logger threshold live");
+            Equal(true,logger.DebugMessages.Any(x=>x.Contains("buy=100")&&x.Contains("craft=1000")),"debug config snapshot uses current quantities");
+            Equal(true,logger.DebugMessages.Any(x=>x.Contains("Runtime:")&&x.Contains("build=")&&x.Contains("Terraria=1.4.5.8")),"enabling diagnostics after startup captures runtime and build identity");
             mod.OnWorldLoad(); mod.OnWorldUnload();
+            int recorded=logger.DebugMessages.Count;
+            Equal(true,recorded>=3,"enabled diagnostics include lifecycle events");
+            typeof(ShiftBatch.BatchConfig).GetProperty("DebugLogging").SetValue(config,false,null);
+            mod.OnConfigChanged(); mod.OnWorldLoad();
+            Equal(recorded,logger.DebugMessages.Count,"disabling diagnostics takes effect immediately");
+            Equal(TerrariaModder.Core.Logging.LogLevel.Warn,logger.MinLevel,"disabling restores previous logger threshold");
+            typeof(ShiftBatch.BatchConfig).GetProperty("DebugLogging").SetValue(config,true,null);
+            mod.OnConfigChanged();
         }
         finally { mod.Unload(); }
         Equal(false, ShiftBatch.NativePatches.Active, "mod unload deactivates callbacks");
+        Equal(TerrariaModder.Core.Logging.LogLevel.Warn,logger.MinLevel,"unload restores logger threshold after debug was enabled");
         Equal(true, ShiftBatch.NativePatches.Config == null, "mod unload releases config");
         Equal(false, Harmony.GetAllPatchedMethods().Any(x => Harmony.GetPatchInfo(x).Owners.Any(owner => owner.StartsWith("gene.terrariamodder.shift-batch", StringComparison.Ordinal))), "mod unload removes native and config detours");
         try
@@ -646,13 +759,53 @@ internal static class Tests
     private sealed class TestLogger : TerrariaModder.Core.Logging.ILogger
     {
         public readonly List<string> Errors = new List<string>();
+        public readonly List<string> DebugMessages = new List<string>();
+        public readonly List<string> Warnings = new List<string>();
         public TerrariaModder.Core.Logging.LogLevel MinLevel { get; set; }
+        public TestLogger(){MinLevel=TerrariaModder.Core.Logging.LogLevel.Info;}
         public string ModId { get { return "shift-batch-tests"; } }
-        public void Debug(string message) { }
+        public void Debug(string message) { if(MinLevel<=TerrariaModder.Core.Logging.LogLevel.Debug)DebugMessages.Add(message); }
         public void Info(string message) { }
-        public void Warn(string message) { }
+        public void Warn(string message) { if(MinLevel<=TerrariaModder.Core.Logging.LogLevel.Warn)Warnings.Add(message); }
         public void Error(string message) { Errors.Add(message); }
         public void Error(string message, Exception error) { Errors.Add(message + ": " + error); }
+    }
+
+    private static readonly List<string> CoreLogLines=new List<string>();
+    private static bool CaptureCoreLine(string __0){CoreLogLines.Add(__0);return false;}
+
+    private static void CheckCoreLogging()
+    {
+        // Keep the actual Core formatting/filtering/recent-log path; suppress
+        // only file/console output so tests never alter the user's game logs.
+        var harness=new Harmony("shift-batch.core-logging-tests");
+        bool oldConsole=TerrariaModder.Core.Logging.LogManager.SuppressConsole;
+        var logger=new TerrariaModder.Core.Logging.ModLogger("shift-batch-diagnostic-test");
+        var config=new ShiftBatch.BatchConfig();
+        var flags=BindingFlags.Static|BindingFlags.Public|BindingFlags.NonPublic;
+        try {
+            harness.Patch(typeof(TerrariaModder.Core.Logging.LogManager).GetMethod("WriteToSharedFile",flags),
+                prefix:new HarmonyMethod(typeof(Tests).GetMethod("CaptureCoreLine",flags)));
+            TerrariaModder.Core.Logging.LogManager.SuppressConsole=true;
+            ShiftBatch.DebugLog.Initialize(logger,config);
+            int before=CoreLogLines.Count;
+            ShiftBatch.DebugLog.Write("disabled-probe");
+            Equal(before,CoreLogLines.Count,"real Core logger receives no optional debug when disabled");
+            config.DebugLogging=true; ShiftBatch.DebugLog.ApplySettings();
+            ShiftBatch.DebugLog.Write("enabled-probe");
+            Equal(true,CoreLogLines.Any(x=>x.Contains("[DEBUG]")&&x.Contains("[shift-batch-diagnostic-test]")&&x.Contains("enabled-probe")),"real Core accepts and formats enabled debug despite its default Info threshold");
+            Equal(true,TerrariaModder.Core.Logging.LogManager.GetRecentLogs(100).Any(x=>x.ModId==logger.ModId&&x.Message=="enabled-probe"),"enabled debug also reaches Core recent logs");
+            config.DebugLogging=false; ShiftBatch.DebugLog.ApplySettings();
+            before=CoreLogLines.Count; ShiftBatch.DebugLog.Write("disabled-again-probe");
+            Equal(before,CoreLogLines.Count,"real Core stops optional debug immediately after disabling");
+            logger.Warn("warning-probe"); logger.Error("error-probe");
+            Equal(before+2,CoreLogLines.Count,"real Core warning/error paths remain active with debug off");
+        } finally {
+            ShiftBatch.DebugLog.Unload(); harness.UnpatchAll(harness.Id);
+            TerrariaModder.Core.Logging.LogManager.SuppressConsole=oldConsole;
+            ShiftBatch.ConfigInputGuard.Uninstall();
+        }
+        Equal(TerrariaModder.Core.Logging.LogLevel.Info,logger.MinLevel,"real Core logger threshold restored on unload");
     }
 
     private sealed class OtherModConfig : TerrariaModder.Core.Config.ModConfig

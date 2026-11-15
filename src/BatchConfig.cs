@@ -11,13 +11,13 @@ namespace ShiftBatch
         private volatile int craft = BatchRules.DefaultBatch;
         private readonly List<string> warnings = new List<string>();
 
-        public override int Version { get { return 2; } }
+        public override int Version { get { return 4; } }
 
         [Client, Label("Enabled / 启用"), Description("Restore vanilla behavior when disabled. 关闭后恢复原版行为。")]
         public bool Enabled { get; set; }
 
         // Core's int coercion rounds JSON doubles. Text-backed fields let us reject
-        // fractional/invalid input on EVERY route (F6, manual JSON and hot reload).
+        // fractional/invalid input on EVERY route (mod settings, manual JSON and hot reload).
         [Client, Label("Shift buy / 购买数量"), Description("10-9999 items per Shift batch; default 10. 输入整数，回车确认；默认10。")]
         public string PurchaseBatch
         {
@@ -38,8 +38,8 @@ namespace ShiftBatch
         [Client, Label("Auto-stow / 满堆叠收包"), Description("Off by default. Keep holding Shift+mouse at the same shop/recipe to stow after 0.3s. 默认关闭；持续长按约0.3秒后收包，松键取消。")]
         public bool AutoStow { get; set; }
 
-        [Client, Label("Limit sound / 满堆叠提示音"), Description("With auto-stow enabled, play once when capacity is reached, BEFORE the delay. 收包功能启用时，达到容量上限立即提示，方便及时松键。")]
-        public bool LimitSound { get; set; }
+        [Client, Label("Debug logging / 调试日志"), Description("Off by default. Log configuration, patch loading and auto-stow transitions for troubleshooting; applies immediately. 默认关闭；即时生效，记录配置、补丁加载和收包状态变化。")]
+        public bool DebugLogging { get; set; }
 
         public BatchConfig()
         {
@@ -48,7 +48,7 @@ namespace ShiftBatch
             ConfigInputGuard.EnsureInstalled();
             Enabled = true;
             AutoStow = false;
-            LimitSound = true;
+            DebugLogging = false;
         }
 
         private int Normalize(string text, int previous, string field)

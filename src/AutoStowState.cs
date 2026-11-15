@@ -2,8 +2,7 @@ using System;
 
 namespace ShiftBatch
 {
-    [Flags]
-    public enum StowDecision { None = 0, ReachedLimit = 1, Transfer = 2 }
+    public enum StowDecision { None = 0, Started = 1, Transfer = 2 }
 
     // Evaluated only by freshly observed native shop/craft interactions. A timer
     // never transfers on its own, so leaving the target cannot fire stale work.
@@ -18,6 +17,7 @@ namespace ShiftBatch
         private bool pending;
         private bool blocked;
         private bool seenThisDraw;
+        public bool IsPending { get { return pending; } }
 
         public StowDecision Observe(uint now, object newSource, int newSlot, object newCursor, int newStack, bool atLimit)
         {
@@ -33,7 +33,7 @@ namespace ShiftBatch
             {
                 source = newSource; slot = newSlot; cursor = newCursor; stack = newStack;
                 started = now; pending = true; blocked = false;
-                return StowDecision.ReachedLimit;
+                return StowDecision.Started;
             }
             return !blocked && unchecked(now - started) >= DelayTicks ? StowDecision.Transfer : StowDecision.None;
         }

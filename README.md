@@ -6,6 +6,8 @@ Configure how many items you buy or how many times you execute a crafting recipe
 
 Buying and crafting have separate settings. Both default to **10**, preserving the vanilla batch size, and accept values from **10 to 9999**. Actual operations are bounded by the item's remaining stack capacity.
 
+**Version 1.0 (metadata: 1.0.0).** Releases are built and published by GitHub Actions from approved version tags. See [CI and tag releases](docs/CI.md).
+
 ## Contents
 
 - [Features](#features)
@@ -22,7 +24,7 @@ Buying and crafting have separate settings. Both default to **10**, preserving t
 
 ## Features
 
-- Separate Shift buying and crafting settings in the **F6** mod menu.
+- Separate Shift buying and crafting settings on the **Shift Batch configuration page** in the mod manager.
 - Defaults of **10 items** per buying batch and **10 recipe executions** per crafting batch.
 - Live configuration updates with automatic persistence.
 - Integer validation, range clamping, and retention of the previous value after invalid input.
@@ -30,14 +32,14 @@ Buying and crafting have separate settings. Both default to **10**, preserving t
 - Vanilla prices, payment, stock, ingredient checks, and hold-to-repeat behavior remain in use.
 - An enable/disable setting restores vanilla behavior without removing the mod.
 - Optional delayed auto-stow lets you keep holding Shift and the mouse button across full stacks. It is **off by default**.
-- An optional built-in sound warns immediately at the capacity limit, before the transfer delay.
+- Optional debug logging for configuration, runtime/patch details and auto-stow state changes, off by default and applied immediately.
 
 ## Requirements
 
 | Component | Tested version / requirement |
 | --- | --- |
 | Operating system | Windows; the upstream framework targets Windows 10 and 11 |
-| Terraria | **1.4.5.8**; this release checks the executable version |
+| Terraria | **1.4.5.8**; this build checks the executable version |
 | TerrariaModder Core | Built and tested against assembly **0.4.2.0** |
 | Launcher | TerrariaModder Vault or `TerrariaInjector.exe` |
 
@@ -45,10 +47,10 @@ Install the framework using its [installation guide](https://inidar1.github.io/t
 
 ## Installation
 
-1. Obtain `ShiftBatch-1.1.0.zip`, or build it from source with `package.ps1`.
+1. Download [ShiftBatch-1.0.0.zip](https://github.com/gene9831/terraria-shift-batch/releases/download/v1.0.0/ShiftBatch-1.0.0.zip), or build it from source with `package.ps1`.
 2. In Vault, install the ZIP as a local mod archive. Alternatively, merge the ZIP's `TerrariaModder` folder into the folder containing `Terraria.exe`.
 3. Restart the modded game through Vault or `TerrariaInjector.exe`.
-4. Open **F6 → Shift Batch**.
+4. Open the mod manager and select **Shift Batch → configuration**.
 
 Expected layout:
 
@@ -57,16 +59,16 @@ Expected layout:
 └── TerrariaModder/mods/shift-batch/
     ├── ShiftBatch.dll
     ├── manifest.json
-    ├── README.md
-    ├── README.zh-CN.md
     └── LICENSE.txt
 ```
+
+The installation ZIP contains only these three files. Both READMEs remain in the source repository and source ZIP. When upgrading an older local build, remove its leftover `README.md` and `README.zh-CN.md` from this mod's folder; merging a ZIP does not delete existing files.
 
 To uninstall, close the game and remove this mod's `shift-batch` folder. To temporarily restore vanilla behavior, turn off **Enabled / 启用** in the mod's settings.
 
 ## Usage
 
-1. Press **F6**, select **Shift Batch**, and edit either batch setting.
+1. Open **Shift Batch's configuration page** in the mod manager and edit either batch setting.
 2. Click its value, enter an integer, then press Enter or click outside the field. The change saves and applies immediately.
 3. In a vanilla NPC shop, hold **Left Shift** and buy an item as usual.
 4. In the vanilla crafting interface, hold **Left Shift** and craft as usual.
@@ -77,21 +79,21 @@ Holding the mouse button continues to repeat and uses vanilla acceleration. A ba
 
 ### Optional auto-stow
 
-Enable **Auto-stow / 满堆叠收包** in F6. When the cursor reaches its effective capacity, the optional **Limit sound / 满堆叠提示音** plays immediately. Keep holding Shift and the same valid mouse button over the same shop item or focused recipe for about **0.3 seconds**; the held items then move into personal inventory and vanilla buying/crafting can continue.
+Enable **Auto-stow / 满堆叠收包** on the mod's configuration page. When the cursor reaches its effective capacity, keep holding Shift and the same mouse button over the same shop item or focused recipe for about **0.3 seconds**; the held items then move into personal inventory and vanilla buying/crafting can continue. Both left-button and right-button purchases are supported.
 
-Release Shift or the mouse button during the warning interval to cancel. Moving away from the target, changing the cursor item, pausing, losing window focus, or opening a blocking mod panel also cancels pending work. Native crafting restrictions, such as item reuse, inventory stacking, selecting a new recipe, or pending server craft grants, prevent auto-stow until the interaction becomes eligible again. Sound is emitted at the limit, **not when items enter inventory**, and only once per full-stack cycle.
+Release Shift or the mouse button during the delay to cancel. Moving away from the target, changing the cursor item, pausing, losing window focus, or opening a blocking mod panel also cancels pending work. Native crafting restrictions, such as item reuse, inventory stacking, selecting a new recipe, or pending server craft grants, prevent auto-stow until the interaction becomes eligible again.
 
 Native inventory placement can use compatible existing stacks, empty slots, and normal coin/ammo slots. If only part fits, the remainder stays on the cursor. If nothing fits, the item stays held and the mod waits for a restarted interaction instead of repeatedly retrying. It does not drop items or route them into a void vault or storage mod.
 
 ## Configuration
 
-| F6 setting | JSON key | Default | Allowed values |
+| Mod setting | JSON key | Default | Allowed values |
 | --- | --- | --- | --- |
 | Enabled / 启用 | `Enabled` | `true` | `true`, `false` |
 | Shift buy / 购买数量 | `PurchaseBatch` | `"10"` | Integer text, 10–9999 |
 | Shift craft / 制作次数 | `CraftBatch` | `"10"` | Integer text, 10–9999 |
 | Auto-stow / 满堆叠收包 | `AutoStow` | `false` | `true`, `false` |
-| Limit sound / 满堆叠提示音 | `LimitSound` | `true` | Used only while auto-stow is enabled |
+| Debug logging / 调试日志 | `DebugLogging` | `false` | `true`, `false` |
 
 Configuration is saved to:
 
@@ -101,12 +103,12 @@ Configuration is saved to:
 
 ```json
 {
-  "_version": 2,
+  "_version": 4,
   "Enabled": true,
   "PurchaseBatch": "10",
   "CraftBatch": "10",
   "AutoStow": false,
-  "LimitSound": true
+  "DebugLogging": false
 }
 ```
 
@@ -171,11 +173,13 @@ The SDK project is provided as an alternative; the verified build path is `build
 .\test.ps1 -TerrariaPath $terraria
 ```
 
-The current automated suite passes **239 assertions**, covering input validation, Core configuration loading/saving, raw-number precision edge cases, stack arithmetic, actual game IL transformations, native Harmony patch installation/removal, lifecycle handling, delayed transfer cancellation, limit-sound timing, and real native inventory placement/conservation in an isolated x86 process.
+The current automated suite passes **272 assertions**, covering input validation, Core configuration loading/saving, raw-number precision edge cases, stack arithmetic, actual game IL transformations, native Harmony patch installation/removal, lifecycle handling, delayed transfer cancellation, native inventory placement/conservation and real Core debug-log filtering in an isolated x86 process.
+
+Run `powershell -ExecutionPolicy Bypass -File .\tests\Test-Package.ps1 -TerrariaPath $terraria` to additionally verify the real packaging pipeline. This seeds stale documentation/binary files and confirms that the rebuilt installation ZIP contains exactly the three runtime files, source documentation is retained, and product/DLL versions match the manifest.
 
 Tests do not start the game entry point or open user characters/worlds. Their save path points to `build/game-sandbox`.
 
-**Manual verification:** the maintainer reported successful in-game verification of **1.0.0** on **2026-11-15**. The new 1.1.0 auto-stow behavior has automated coverage and still needs in-game verification. Multiplayer behavior has not been verified.
+**Manual verification:** the maintainer verified buying, crafting and the corrected auto-stow behavior in game on **2026-11-15**. The maintainer also verified the debug switch and its live logs. Final verification of the downloaded CI Release is performed separately. Multiplayer behavior has not been verified.
 
 ## Compatibility and limitations
 
@@ -190,13 +194,15 @@ See [development notes](https://github.com/gene9831/terraria-shift-batch/blob/ma
 
 | Symptom | Check |
 | --- | --- |
-| Shift Batch is missing from F6 | Check the folder layout and `manifest.json`, then restart using the modded launcher. |
+| Shift Batch is missing from the mod manager | Check the folder layout and `manifest.json`, then restart using the modded launcher. |
 | Shift still uses the default batch | Confirm the mod is enabled and the field edit was confirmed. Check the latest Core log for patch errors. |
 | Fewer items are bought/crafted than requested | Check cursor capacity, incompatible items, currency, stock, materials, and crafting conditions. |
 | Build reports a missing reference | Verify `-TerrariaPath`, Core/Harmony installation, and the XNA runtime assemblies. |
 | Compiler or reference assemblies are missing | Install the required .NET Framework development tools, or use the SDK project with net48 reference assemblies. |
 
 Logs: `<Terraria folder>/TerrariaModder/core/logs/terrariamodder.client.session-*.log`. Use the newest session and look for `[shift-batch]` entries.
+
+For troubleshooting, enable **Debug logging / 调试日志** on **Shift Batch's configuration page**, reproduce the issue, then turn it off. No dedicated hotkey is added. Debug lines include runtime versions/build identity, current settings, patch readiness, and auto-stow waiting/cancellation/transfer/blocked results with item counts. Waiting and full-bag holds do not log every frame. The switch opens only this mod's logger threshold; no global logging setting needs changing. Warnings and errors keep using Core's normal logging path when debug is off.
 
 ## Contributing
 
@@ -207,3 +213,5 @@ See [CONTRIBUTING.md](https://github.com/gene9831/terraria-shift-batch/blob/main
 Released under the [MIT License](LICENSE.txt). Terraria and third-party dependencies retain their own licenses and are not included in this repository.
 
 Thanks to [TerrariaModder](https://github.com/Inidar1/terraria-modder), [Harmony](https://github.com/pardeike/Harmony), and the Terraria developers.
+
+CI also checks tag/version consistency, client API references and release SHA-256 checksums using verified public dependencies. See [docs/CI.md](docs/CI.md) for the cloud build and tag publishing process.

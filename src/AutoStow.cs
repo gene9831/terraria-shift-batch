@@ -1,8 +1,6 @@
 using System;
 using System.Reflection;
 using Terraria;
-using Terraria.Audio;
-using Terraria.ID;
 using TerrariaModder.Core.Logging;
 using TerrariaModder.Core.UI;
 
@@ -27,17 +25,42 @@ namespace ShiftBatch
             .GetProperty("HasPendingRequests", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
         public static ILogger Logger;
 
-        public static void ShopPrefix(Item[] __0, int __1, bool __2, bool __3, out Observation __state)
+        public static void ShopLeftPrefix(Item[] __0, int __1, int __2, out Observation __state)
         {
-            __state = new Observation();
-            if (!CanTrack() || __0 == null || __1 < 0 || __1 >= __0.Length) return;
-            int buttons = Buttons() & ((__2 ? 2 : 0) | (__3 ? 1 : 0));
-            Item output = __0[__1];
-            if (buttons == 0 || output == null || output.IsAir) return;
-            __state = Capture(__0, __1, output, 1, buttons, false);
+            __state = CaptureShop(__0, __1, __2, Main.mouseLeft);
         }
 
-        public static void ShopPostfix(Observation __state) { Observe(__state); }
+        public static void ShopRightPrefix(Item[] __0, int __1, int __2, out Observation __state)
+        {
+            // Both native click handlers run every draw. Observe just once if
+            // both buttons are down, and ignore the inactive button's callback.
+            __state = CaptureShop(__0, __1, __2, !Main.mouseLeft && Main.mouseRight);
+        }
+
+        private static Observation CaptureShop(Item[] inventory, int context, int slot, bool pressed)
+        {
+            // Observe before native click routing: LeftClick skips the inner
+            // transaction function once the cursor is full. The small Handle
+            // dispatcher can be JIT-inlined, so patch the large click methods.
+            if (context != 15 || !pressed || !CanTrack() || inventory == null || slot < 0 || slot >= inventory.Length)
+                return new Observation();
+            if (Main.LocalPlayerHasPendingInventoryActions()) { Cancel("pending inventory actions"); return new Observation(); }
+            int buttons = Buttons();
+            Item output = inventory[slot];
+            if (output == null || output.IsAir) return new Observation();
+            return Capture(inventory, slot, output, 1, buttons, false);
+        }
+
+        public static void ShopPostfix(Observation __state)
+        {
+            // Other slot contexts must not erase a shop observation from the
+            // same frame. EndDraw cancels if the shop target was not observed.
+            if (__state.Source != null)
+            {
+                if (Main.LocalPlayerHasPendingInventoryActions()) { Cancel("pending inventory actions"); return; }
+                Observe(__state);
+            }
+        }
 
         public static void CraftPrefix(int __0, out Observation __state)
         {
@@ -56,7 +79,7 @@ namespace ShiftBatch
         {
             // Native hover processing can set its release-before-crafting flag
             // during this very call, after the prefix captured the target.
-            if (!CanTrack() || !CraftAllowed()) { Reset(); return; }
+            if (!CanTrack() || !CraftAllowed()) { Cancel("crafting interaction unavailable"); return; }
             Observe(__state);
         }
 
@@ -98,7 +121,7 @@ namespace ShiftBatch
             if (!CanTrack() || observation.Source == null || observation.Output == null ||
                 (Buttons() & observation.Buttons) == 0)
             {
-                Reset();
+                Cancel("input or target unavailable");
                 return;
             }
             Item cursor = Main.mouseItem;
@@ -107,14 +130,29 @@ namespace ShiftBatch
             bool full = compatible && BatchRules.IsAtCapacity(cursor.maxStack, cursor.stack, observation.PerCraft);
             uint tick = Main.GameUpdateCount;
             int key = observation.Slot * 4 + observation.Buttons;
+            bool wasPending = State.IsPending;
             StowDecision decision = State.Observe(tick, observation.Source, key, cursor, cursor == null ? 0 : cursor.stack, full);
-            if ((decision & StowDecision.ReachedLimit) != 0 && NativePatches.Config.LimitSound)
+            if (DebugLog.Enabled)
             {
-                try { SoundEngine.PlaySound(SoundID.MenuTick, -1, -1, 1, 0.65f, 0.25f); }
-                catch (Exception ex) { if (Logger != null) Logger.Debug("Limit sound unavailable: " + ex.Message); }
+                if (decision == StowDecision.Started)
+                    DebugLog.Write("Auto-stow waiting: source=" + (observation.Crafting ? "craft" : "shop") +
+                        "; slot=" + observation.Slot + "; buttons=" + observation.Buttons + "; type=" + cursor.type +
+                        "; prefix=" + cursor.prefix + "; held=" + cursor.stack + "; maxStack=" + cursor.maxStack +
+                        "; perCraft=" + observation.PerCraft + "; delayTicks=" + AutoStowState.DelayTicks);
+                else if (wasPending && !State.IsPending)
+                    DebugLog.Write("Auto-stow cancelled: cursor no longer at compatible capacity.");
             }
             if ((decision & StowDecision.Transfer) == 0) return;
+            int before = cursor.stack;
             bool moved = TransferToInventory();
+            if (DebugLog.Enabled)
+            {
+                Item remainder = Main.mouseItem;
+                int remaining = remainder == null || remainder.IsAir ? 0 : remainder.stack;
+                DebugLog.Write("Auto-stow " + (moved ? "transfer" : "blocked") + ": source=" +
+                    (observation.Crafting ? "craft" : "shop") + "; type=" + observation.Output.type +
+                    "; held=" + before + "; moved=" + (before - remaining) + "; remaining=" + remaining);
+            }
             if (moved)
             {
                 if (observation.Crafting && observation.Output.maxStack == 1 && RepeatRecipe != null) RepeatRecipe.SetValue(null, -1);
@@ -173,8 +211,19 @@ namespace ShiftBatch
             return count;
         }
 
-        public static void CancelIfInactive() { if (!CanTrack()) Reset(); }
-        public static void EndDraw() { State.EndDraw(); }
-        public static void Reset() { State.Reset(); }
+        private static void Cancel(string reason)
+        {
+            if (State.IsPending && DebugLog.Enabled) DebugLog.Write("Auto-stow cancelled: " + reason + ".");
+            State.Reset();
+        }
+
+        public static void CancelIfInactive() { if (!CanTrack()) Cancel("interaction inactive"); }
+        public static void EndDraw()
+        {
+            bool wasPending = State.IsPending;
+            State.EndDraw();
+            if (wasPending && !State.IsPending) DebugLog.Write("Auto-stow cancelled: target not observed this draw.");
+        }
+        public static void Reset() { Cancel("configuration or world lifecycle changed"); }
     }
 }

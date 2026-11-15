@@ -25,6 +25,8 @@ The scripts use the local game files as references. Do not commit or redistribut
 - Run the full automated suite and test the affected behavior in game when possible.
 - State which Terraria/Core versions and multiplayer scenarios you actually tested.
 - Update both READMEs and the changelog when behavior changes.
+- Change product versions only for a maintainer-approved release. Push its matching version tag to let CI publish; do not create or upload a Release manually.
+- Run `tests/Test-Package.ps1` after packaging changes. Runtime archives contain only DLL, manifest and LICENSE; documentation belongs in source.
 
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the patch map and configuration design.
 
@@ -38,8 +40,12 @@ Open a repository issue with:
 - Expected and actual behavior.
 - Relevant `[shift-batch]` lines from the latest Core session log.
 
+Enable **Debug logging** on Shift Batch's configuration page before reproducing the problem, then turn it off. Debug lines include a module build identifier, useful while local builds share product version 1.0.0.
+
 Include a short relevant log excerpt rather than an entire save, configuration collection, or unrelated session history. Remove personal data before posting.
 
 ## Pull requests
 
 Describe the concrete problem, resulting behavior, and verification performed. Keep changes focused. Contributions are made under the project's [MIT License](LICENSE.txt).
+
+See [docs/CI.md](docs/CI.md) for cloud dependency preparation and release checks. After a packaging build, run tests/Test-Release.ps1 as well.
