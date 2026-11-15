@@ -4,7 +4,7 @@
 
 Configure how many items you buy or how many times you execute a crafting recipe while holding **Left Shift** in Terraria. Shift Batch is a small client-side mod for [TerrariaModder](https://github.com/Inidar1/terraria-modder).
 
-Buying and crafting have separate settings. Both default to **10**, preserving the vanilla batch size, and accept values from **1 to 9999**. Actual operations are bounded by the item's remaining stack capacity.
+Buying and crafting have separate settings. Both default to **10**, preserving the vanilla batch size, and accept values from **10 to 9999**. Actual operations are bounded by the item's remaining stack capacity.
 
 ## Contents
 
@@ -29,6 +29,8 @@ Buying and crafting have separate settings. Both default to **10**, preserving t
 - Capacity checks for an empty cursor, existing compatible stacks, and recipes producing multiple items.
 - Vanilla prices, payment, stock, ingredient checks, and hold-to-repeat behavior remain in use.
 - An enable/disable setting restores vanilla behavior without removing the mod.
+- Optional delayed auto-stow lets you keep holding Shift and the mouse button across full stacks. It is **off by default**.
+- An optional built-in sound warns immediately at the capacity limit, before the transfer delay.
 
 ## Requirements
 
@@ -43,7 +45,7 @@ Install the framework using its [installation guide](https://inidar1.github.io/t
 
 ## Installation
 
-1. Obtain `ShiftBatch-1.0.0.zip`, or build it from source with `package.ps1`.
+1. Obtain `ShiftBatch-1.1.0.zip`, or build it from source with `package.ps1`.
 2. In Vault, install the ZIP as a local mod archive. Alternatively, merge the ZIP's `TerrariaModder` folder into the folder containing `Terraria.exe`.
 3. Restart the modded game through Vault or `TerrariaInjector.exe`.
 4. Open **F6 → Shift Batch**.
@@ -73,13 +75,23 @@ To uninstall, close the game and remove this mod's `shift-batch` folder. To temp
 
 Holding the mouse button continues to repeat and uses vanilla acceleration. A batch setting is not a total target for the entire hold.
 
+### Optional auto-stow
+
+Enable **Auto-stow / 满堆叠收包** in F6. When the cursor reaches its effective capacity, the optional **Limit sound / 满堆叠提示音** plays immediately. Keep holding Shift and the same valid mouse button over the same shop item or focused recipe for about **0.3 seconds**; the held items then move into personal inventory and vanilla buying/crafting can continue.
+
+Release Shift or the mouse button during the warning interval to cancel. Moving away from the target, changing the cursor item, pausing, losing window focus, or opening a blocking mod panel also cancels pending work. Native crafting restrictions, such as item reuse, inventory stacking, selecting a new recipe, or pending server craft grants, prevent auto-stow until the interaction becomes eligible again. Sound is emitted at the limit, **not when items enter inventory**, and only once per full-stack cycle.
+
+Native inventory placement can use compatible existing stacks, empty slots, and normal coin/ammo slots. If only part fits, the remainder stays on the cursor. If nothing fits, the item stays held and the mod waits for a restarted interaction instead of repeatedly retrying. It does not drop items or route them into a void vault or storage mod.
+
 ## Configuration
 
 | F6 setting | JSON key | Default | Allowed values |
 | --- | --- | --- | --- |
 | Enabled / 启用 | `Enabled` | `true` | `true`, `false` |
-| Shift buy / 购买数量 | `PurchaseBatch` | `"10"` | Integer text, 1–9999 |
-| Shift craft / 制作次数 | `CraftBatch` | `"10"` | Integer text, 1–9999 |
+| Shift buy / 购买数量 | `PurchaseBatch` | `"10"` | Integer text, 10–9999 |
+| Shift craft / 制作次数 | `CraftBatch` | `"10"` | Integer text, 10–9999 |
+| Auto-stow / 满堆叠收包 | `AutoStow` | `false` | `true`, `false` |
+| Limit sound / 满堆叠提示音 | `LimitSound` | `true` | Used only while auto-stow is enabled |
 
 Configuration is saved to:
 
@@ -89,14 +101,16 @@ Configuration is saved to:
 
 ```json
 {
-  "_version": 1,
+  "_version": 2,
   "Enabled": true,
   "PurchaseBatch": "10",
-  "CraftBatch": "10"
+  "CraftBatch": "10",
+  "AutoStow": false,
+  "LimitSound": true
 }
 ```
 
-- Values above 9999 become 9999; values below 1 become 1.
+- Values above 9999 become 9999; values below 10 become 10. Existing lower values migrate to 10. Capacity, stock, currency, or materials may still reduce an actual operation below 10.
 - Letters, fractions, blank input, and integer overflow keep the previous valid value, initially 10. A warning is logged and shown in game when a world is active.
 - Use ordinary integer strings when editing JSON. Raw floating-point/scientific values are rejected before Core can round or stringify them.
 
@@ -110,7 +124,7 @@ The effective capacity is the item's `maxStack`, with a defensive ceiling of 999
 | Crafting 25 items per recipe, empty cursor, stack limit 9999 | Execute 399 times → 9975 items |
 | Crafting 25 items per recipe, cursor already holds 9900 | Execute 3 times → 75 additional items |
 
-Crafting stops when there is insufficient space for a complete recipe output. Output is not partially discarded or automatically sent to another container. Capacity checks also apply after vanilla hold acceleration.
+Crafting stops when there is insufficient space for a complete recipe output. With auto-stow enabled, this is also an effective limit: a 25-output recipe can stow its 9975-item stack rather than waiting for an unreachable 9999. Output is not partially discarded. Capacity checks also apply after vanilla hold acceleration.
 
 ## Building from source
 
@@ -157,11 +171,11 @@ The SDK project is provided as an alternative; the verified build path is `build
 .\test.ps1 -TerrariaPath $terraria
 ```
 
-The current automated suite passes **119 assertions**, covering input validation, Core configuration loading/saving, raw-number precision edge cases, stack arithmetic, actual game IL transformations, native Harmony patch installation/removal, lifecycle handling, and capacity checks with real game objects in an isolated x86 process.
+The current automated suite passes **239 assertions**, covering input validation, Core configuration loading/saving, raw-number precision edge cases, stack arithmetic, actual game IL transformations, native Harmony patch installation/removal, lifecycle handling, delayed transfer cancellation, limit-sound timing, and real native inventory placement/conservation in an isolated x86 process.
 
 Tests do not start the game entry point or open user characters/worlds. Their save path points to `build/game-sandbox`.
 
-**Manual verification:** the maintainer reported successful in-game verification on **2026-11-15**. Multiplayer behavior has not been verified.
+**Manual verification:** the maintainer reported successful in-game verification of **1.0.0** on **2026-11-15**. The new 1.1.0 auto-stow behavior has automated coverage and still needs in-game verification. Multiplayer behavior has not been verified.
 
 ## Compatibility and limitations
 

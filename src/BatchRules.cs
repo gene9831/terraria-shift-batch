@@ -6,6 +6,7 @@ namespace ShiftBatch
     public static class BatchRules
     {
         public const int DefaultBatch = 10;
+        public const int MinimumBatch = 10;
         public const int MaximumBatch = 9999;
 
         public static bool TryNormalize(string text, int previous, out int value)
@@ -20,7 +21,7 @@ namespace ShiftBatch
 
         public static int Clamp(int value)
         {
-            return Math.Max(1, Math.Min(MaximumBatch, value));
+            return Math.Max(MinimumBatch, Math.Min(MaximumBatch, value));
         }
 
         private static int Capacity(int maxStack, int cursorStack)
@@ -28,6 +29,13 @@ namespace ShiftBatch
             // Use long for subtraction even if another mod left a corrupt stack value.
             long available = (long)Math.Min(MaximumBatch, Math.Max(0, maxStack)) - Math.Max(0, cursorStack);
             return (int)Math.Max(0L, available);
+        }
+
+        public static bool IsAtCapacity(int maxStack, int cursorStack, int nextOutput)
+        {
+            int limit = Math.Min(MaximumBatch, Math.Max(0, maxStack));
+            return cursorStack > 0 && cursorStack <= limit && nextOutput > 0 &&
+                Capacity(maxStack, cursorStack) < nextOutput;
         }
 
         public static int PurchaseLimit(int requested, int maxStack, int cursorStack, int stock)

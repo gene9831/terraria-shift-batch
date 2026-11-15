@@ -29,7 +29,10 @@ namespace ShiftBatch
             ConfigInputGuard.EnsureInstalled();
             NativePatches.Config = config;
             NativePatches.Active = false;
+            AutoStow.Logger = log;
+            AutoStow.Reset();
             FrameEvents.OnPostUpdate += Update;
+            FrameEvents.OnPostDraw += AutoStow.EndDraw;
             log.Info("Shift Batch: buy=" + config.PurchaseCount + ", craft=" + config.CraftCount + "; waiting for game content.");
         }
 
@@ -52,8 +55,8 @@ namespace ShiftBatch
                 NativePatches.CraftTranspiler(PatchProcessor.GetCurrentInstructions(crafting)).ToList();
                 harmony = new Harmony(HarmonyId);
                 harmony.Patch(typeof(ItemSlot).GetMethod("GetBulkBuyAmount", flags), postfix: Hook("BuyAmountPostfix"));
-                harmony.Patch(shop, transpiler: Hook("ShopTranspiler"));
-                harmony.Patch(crafting, transpiler: Hook("CraftTranspiler"));
+                harmony.Patch(shop, prefix: StowHook("ShopPrefix"), postfix: StowHook("ShopPostfix"), transpiler: Hook("ShopTranspiler"));
+                harmony.Patch(crafting, prefix: StowHook("CraftPrefix"), postfix: StowHook("CraftPostfix"), transpiler: Hook("CraftTranspiler"));
                 harmony.Patch(request, prefix: Hook("CraftRequestPrefix"));
                 harmony.Patch(typeof(ItemSlot).GetMethod("GetBulkCraftAmount", flags), postfix: Hook("CraftAmountPostfix"));
                 NativePatches.Active = true;
@@ -62,6 +65,7 @@ namespace ShiftBatch
             catch (Exception ex)
             {
                 NativePatches.Active = false;
+                AutoStow.Reset();
                 if (harmony != null) harmony.UnpatchAll(HarmonyId);
                 ConfigInputGuard.Uninstall();
                 failure = "Shift Batch disabled: " + ex.Message;
@@ -74,13 +78,20 @@ namespace ShiftBatch
             return new HarmonyMethod(typeof(NativePatches).GetMethod(name, BindingFlags.Static | BindingFlags.Public));
         }
 
+        private static HarmonyMethod StowHook(string name)
+        {
+            return new HarmonyMethod(typeof(AutoStow).GetMethod(name, BindingFlags.Static | BindingFlags.Public));
+        }
+
         public void OnConfigChanged()
         {
+            AutoStow.Reset();
             log.Info("Shift Batch config: enabled=" + config.Enabled + ", buy=" + config.PurchaseCount + ", craft=" + config.CraftCount);
         }
 
         private void Update()
         {
+            AutoStow.CancelIfInactive();
             foreach (string warning in config.TakeWarnings())
             {
                 log.Warn(warning);
@@ -93,13 +104,16 @@ namespace ShiftBatch
             }
         }
 
-        public void OnWorldLoad() { }
-        public void OnWorldUnload() { }
+        public void OnWorldLoad() { AutoStow.Reset(); }
+        public void OnWorldUnload() { AutoStow.Reset(); }
 
         public override void Unload()
         {
             NativePatches.Active = false;
+            AutoStow.Reset();
+            AutoStow.Logger = null;
             FrameEvents.OnPostUpdate -= Update;
+            FrameEvents.OnPostDraw -= AutoStow.EndDraw;
             if (harmony != null) harmony.UnpatchAll(HarmonyId);
             ConfigInputGuard.Uninstall();
             NativePatches.Config = null;
