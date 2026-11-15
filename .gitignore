@@ -1,0 +1,27 @@
+# Generated files and local verification data
+build/
+dist/
+bin/
+obj/
+*.dll
+*.exe
+*.pdb
+*.zip
+*.7z
+*.log
+
+# Editors and machine-specific settings
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+.DS_Store
+Thumbs.db
+
+# Local game installs and credentials
+Terraria/
+TerrariaModder/
+.env
+.env.*
+!.env.example

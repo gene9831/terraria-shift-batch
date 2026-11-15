@@ -1,0 +1,10 @@
+{
+  "id": "shift-batch",
+  "name": "Shift Batch",
+  "version": "1.0.0",
+  "framework_version": ">=0.4.1",
+  "author": "Gene",
+  "description": "Configurable Shift buying and vanilla crafting batches. Separate values, default 10, range 1-9999, with validated input and stack-capacity limits.",
+  "entry_dll": "ShiftBatch.dll",
+  "multiplayer": "client-only"
+}
